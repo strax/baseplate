@@ -11,14 +11,15 @@ use std::thread::{Thread, JoinHandle};
 use crossbeam::channel as chan;
 use std::io::{Read};
 use bytes::Bytes;
-use fern;
 use session::*;
 use std::pin::Pin;
 use std::borrow::BorrowMut;
-use shared::{Packet, hexdump};
+use shared::{packet::Packet, hexdump, proto};
+use rand::random;
+use std::str::FromStr;
 
 pub enum SessionMessage {
-    Send(Bytes),
+    Send(proto::Message),
     Recv(Packet),
     Stop
 }
@@ -35,20 +36,12 @@ impl State {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    fern::Dispatch::new()
-        .format(|out, msg, record| {
-            out.finish(format_args!(
-                "{}:{} | {} | {} | {}",
-                record.file().unwrap_or("unknown"),
-                record.line().unwrap_or(0),
-                thread::current().name().unwrap_or("unknown"),
-                record.level(),
-                msg
-            ))
-        }).chain(std::io::stdout()).apply()?;
+    shared::logging::setup()?;
     trace!("starting server");
 
+    let addr = SocketAddr::from_str("0.0.0.0:12345")?;
     let socket = UdpSocket::bind("0.0.0.0:12345").unwrap();
+    info!("udp socket bound to {}", addr);
     let mut state = Arc::new(RwLock::new(State::new()));
     let mut threads: Vec<JoinHandle<()>> = vec!();
     {
@@ -77,8 +70,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn start_tcp_server(state: Arc<RwLock<State>>, socket: UdpSocket) -> () {
-    let mut acceptor = TcpListener::bind("0.0.0.0:12345").unwrap();
-    info!("tcp acceptor bound");
+    let mut acceptor = TcpListener::bind(socket.local_addr().unwrap()).unwrap();
+    info!("tcp acceptor bound to {}", acceptor.local_addr().unwrap());
 
     loop {
         let (mut stream, remote) = acceptor.accept().unwrap();
@@ -91,10 +84,8 @@ fn start_tcp_server(state: Arc<RwLock<State>>, socket: UdpSocket) -> () {
             let mut wstate = state.write().unwrap();
             trace!("acquired write lock on state");
             wstate.sessions.insert(remote, tx.clone());
-            trace!("inserted tx to session table");
             drop(wstate);
 
-            trace!("start now to read from socket");
 
             let mut buf = [0u8;1024];
             loop {
@@ -117,7 +108,7 @@ fn start_udp_server(state: Arc<RwLock<State>>, socket: UdpSocket) -> () {
     loop {
         let (size, remote) = socket.recv_from(&mut buffer).unwrap();
         let dgram = Bytes::from(&buffer[..size]);
-        trace!("RECV {} {}", remote, hexdump(&dgram));
+        trace!("RECV <bytes> from {}:\n{}", remote, hexdump(&dgram));
         let mut state = state.read().unwrap();
         trace!("acquired read lock on server state");
         match state.sessions.get(&remote) {
@@ -125,10 +116,8 @@ fn start_udp_server(state: Arc<RwLock<State>>, socket: UdpSocket) -> () {
                 warn!("unknown remote, ignoring datagram");
             },
             Some(tx) => {
-                trace!("decoding packet");
                 match Packet::from_bytes(dgram) {
                     Ok(packet) => {
-                        trace!("decode ok, forward to tx");
                         tx.send(SessionMessage::Recv(packet));
                     },
                     Err(err) => {

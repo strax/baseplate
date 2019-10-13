@@ -7,8 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-fern = "0.5.8"
 log = "0.4.8"
 shared = { path = "../shared" }
 crossbeam = "0.7.2"
 bytes = "0.4.12"
+bincode = "1.2.0"
