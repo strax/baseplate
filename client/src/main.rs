@@ -31,6 +31,7 @@ use futures::stream::FusedStream;
 use futures_timer::Delay;
 use log::{debug, error, info, trace, warn};
 use pin_utils::pin_mut;
+use snafu::Snafu;
 
 use shared::{hexdump, packet::Packet, proto};
 use shared::{handshake::*, logging, proto::*};
@@ -43,12 +44,18 @@ struct Conn {
     remote: SocketAddr
 }
 
+#[derive(Snafu, Debug)]
+enum ConnError {
+    #[snafu(display("handshake failure"))]
+    HandshakeFailure
+}
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 async fn keep_alive(conn: Arc<Conn>) {
     loop {
         Delay::new(Duration::from_secs(5)).await;
-        conn.send(Message::Heartbeat).await;
+        conn.send(Message::Heartbeat).await.unwrap_or_else(|err| warn!("error sending heartbeat: {}", err));
     }
 }
 
@@ -60,17 +67,17 @@ impl Conn {
 
         // First send connect message
         trace!("sending connect msg");
-        conn.send(Message::Connect).await;
+        conn.send(Message::Connect).await?;
 
         trace!("sent connect msg");
 
         // Now we should receive a challenge nonce
         match timeout(Duration::from_secs(5), conn.next_message()).await? {
             Message::Handshake(HandshakeMessage::Challenge(nonce)) => {
-                conn.send(Message::Handshake(HandshakeMessage::Challenge(nonce))).await;
+                conn.send(Message::Handshake(HandshakeMessage::Challenge(nonce))).await?;
             }
             _ => {
-                panic!("handshake failed");
+                return Err(ConnError::HandshakeFailure.into())
             }
         }
         match timeout(Duration::from_secs(5), conn.next_message()).await? {
@@ -78,7 +85,7 @@ impl Conn {
                 Ok(conn)
             }
             _ => {
-                panic!("handshake failed");
+                return Err(ConnError::HandshakeFailure.into())
             }
         }
     }
@@ -142,7 +149,7 @@ async fn run() -> Result<()> {
     task::spawn(keep_alive(conn.clone()));
 
     loop {
-        let message = conn.next_message().await;
+        conn.next_message().await;
         trace!("should handle message");
         // let next_message = conn.next_message().boxed().fuse();
         // pin_mut!(next_message);
