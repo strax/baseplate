@@ -1,4 +1,5 @@
 #![feature(mem_take)]
+#![feature(async_closure)]
 
 use std::borrow::Borrow;
 use std::borrow::BorrowMut;
@@ -13,7 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use async_std::{net::UdpSocket, task};
+use async_std::{net::UdpSocket, task, future::timeout};
 use async_std::net::ToSocketAddrs;
 use async_std::sync::Arc;
 use bincode;
@@ -33,6 +34,7 @@ use pin_utils::pin_mut;
 
 use shared::{hexdump, packet::Packet, proto};
 use shared::{handshake::*, logging, proto::*};
+use shared::future::retry;
 
 struct Conn {
     server_sequence: Arc<AtomicU32>,
@@ -63,7 +65,7 @@ impl Conn {
         trace!("sent connect msg");
 
         // Now we should receive a challenge nonce
-        match conn.next_message().await {
+        match timeout(Duration::from_secs(5), conn.next_message()).await? {
             Message::Handshake(HandshakeMessage::Challenge(nonce)) => {
                 conn.send(Message::Handshake(HandshakeMessage::Challenge(nonce))).await;
             }
@@ -71,7 +73,7 @@ impl Conn {
                 panic!("handshake failed");
             }
         }
-        match conn.next_message().await {
+        match timeout(Duration::from_secs(5), conn.next_message()).await? {
             Message::Handshake(HandshakeMessage::Success) => {
                 Ok(conn)
             }
@@ -131,8 +133,10 @@ impl Conn {
 async fn run() -> Result<()> {
     trace!("client starting");
 
-    // Bind an UDP socket to the same port
-    let conn = Arc::new(Conn::connect(SocketAddr::from_str("127.0.0.1:12345")?).await?);
+    // Try to create a connection, retrying 5 times
+    let conn = Arc::new(retry(5, async || {
+        Conn::connect(SocketAddr::from_str("127.0.0.1:12345")?).await
+    }).await.expect("unable to connect to the server"));
     info!("connection estabilished");
 
     task::spawn(keep_alive(conn.clone()));
