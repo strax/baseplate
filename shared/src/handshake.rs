@@ -7,7 +7,7 @@ pub enum HandshakeState {
     Connected
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum HandshakeMessage {
     Challenge(u32),
     Success,

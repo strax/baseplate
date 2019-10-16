@@ -5,6 +5,7 @@ pub mod proto;
 pub mod handshake;
 pub mod logging;
 pub mod future;
+pub mod state;
 
 use packet::*;
 use bytes::Bytes;

@@ -15,4 +15,8 @@ bytes = "0.4.12"
 crossbeam = "0.7.2"
 bincode = "1.2.0"
 rand = "0.7.2"
-mio = "0.6.19"
+async-std = "0.99.9"
+
+[dependencies.futures-preview]
+version = "0.3.0-alpha.19"
+features = ["async-await"]

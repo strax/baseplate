@@ -14,15 +14,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use async_std::{net::UdpSocket, task, future::timeout};
+use async_std::{future::timeout, net::UdpSocket, task};
 use async_std::net::ToSocketAddrs;
 use async_std::sync::Arc;
 use bincode;
 use bytes::Bytes;
-use crossbeam::atomic::AtomicCell;
-use crossbeam::channel as chan;
 use futures::channel::mpsc;
-use futures::executor;
+use futures::{executor, Poll};
 use futures::executor::ThreadPool;
 use futures::lock::Mutex;
 use futures::prelude::*;
@@ -30,27 +28,25 @@ use futures::select;
 use futures::stream::FusedStream;
 use futures_timer::Delay;
 use log::{debug, error, info, trace, warn};
-use pin_utils::pin_mut;
 use snafu::Snafu;
+use ggez;
+use ggez::event::{self, EventHandler, EventsLoop};
+use ggez::graphics;
+use ggez::nalgebra as na;
+use futures::task::Context;
+use futures::pin_mut;
 
-use shared::{hexdump, packet::Packet, proto};
-use shared::{handshake::*, logging, proto::*};
+use conn::Conn;
+use shared::{handshake::*, hexdump, logging, packet::Packet, proto::*, Result};
 use shared::future::retry;
+use ggez::conf::{WindowSetup, NumSamples};
+use ggez::input;
+use ggez::input::keyboard::KeyCode;
+use ggez::event::winit_event::{Event, WindowEvent, KeyboardInput};
+use futures::future::Fuse;
+use futures::stream;
 
-struct Conn {
-    server_sequence: Arc<AtomicU32>,
-    client_sequence: Arc<AtomicU32>,
-    socket: UdpSocket,
-    remote: SocketAddr
-}
-
-#[derive(Snafu, Debug)]
-enum ConnError {
-    #[snafu(display("handshake failure"))]
-    HandshakeFailure
-}
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+mod conn;
 
 async fn keep_alive(conn: Arc<Conn>) {
     loop {
@@ -59,85 +55,55 @@ async fn keep_alive(conn: Arc<Conn>) {
     }
 }
 
-impl Conn {
-    async fn connect(remote: SocketAddr) -> Result<Conn> {
-        let socket = UdpSocket::bind("127.0.0.1:0").await?;
-        trace!("socket created");
-        let conn = Conn { server_sequence: Arc::new(AtomicU32::new(0)), client_sequence: Arc::new(AtomicU32::new(1)), socket, remote };
+struct GameState {
+    positions: Vec<(f32, f32)>
+}
 
-        // First send connect message
-        trace!("sending connect msg");
-        conn.send(Message::Connect).await?;
-
-        trace!("sent connect msg");
-
-        // Now we should receive a challenge nonce
-        match timeout(Duration::from_secs(5), conn.next_message()).await? {
-            Message::Handshake(HandshakeMessage::Challenge(nonce)) => {
-                conn.send(Message::Handshake(HandshakeMessage::Challenge(nonce))).await?;
-            }
-            _ => {
-                return Err(ConnError::HandshakeFailure.into())
-            }
-        }
-        match timeout(Duration::from_secs(5), conn.next_message()).await? {
-            Message::Handshake(HandshakeMessage::Success) => {
-                Ok(conn)
-            }
-            _ => {
-                return Err(ConnError::HandshakeFailure.into())
-            }
-        }
-    }
-
-    async fn send(&self, msg: Message) -> Result<()> {
-        let data = Bytes::from(bincode::serialize(&msg)?);
-        let packet = Packet::new(self.client_sequence.load(Ordering::SeqCst), data);
-        let bytes = packet.to_bytes()?;
-        trace!("SEND {:?}\n{}", msg, hexdump(&bytes));
-        self.socket.send_to(&bytes, &self.remote).await?;
-        self.client_sequence.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    async fn recv1(&self) -> Result<Packet> {
-        trace!("recv1");
-        let mut buffer = [0u8; 65507];
-        let (size, remote) = self.socket.recv_from(&mut buffer).await?;
-        if remote != self.remote {
-            panic!("wrong remote")
-        }
-        let datagram = Bytes::from(&buffer[..size]);
-        trace!("RECV <bytes>\n{}", hexdump(&datagram));
-        let packet = Packet::from_bytes(datagram)?;
-        Ok(packet)
-    }
-
-    async fn next_message(&self) -> Message {
-        loop {
-            let server_sequence = self.server_sequence.clone();
-            if let Ok(packet) = self.recv1().await {
-                if packet.sequence_number > server_sequence.load(Ordering::SeqCst) {
-                    match bincode::deserialize::<Message>(&packet.message) {
-                        Ok(message) => {
-                            self.server_sequence.store(packet.sequence_number, Ordering::SeqCst);
-                            debug!("RECV {:?}", message);
-                            return message;
-                        }
-                        Err(err) => {
-                            warn!("error decoding message: {}", err);
-                        }
-                    }
-                } else {
-                    warn!("received packet with stale sequence number");
-                }
-            }
-            // otherwise reading failed and we try again
-        }
+impl GameState {
+    fn new() -> ggez::GameResult<GameState> {
+        Ok(GameState { positions: vec![] })
     }
 }
 
-async fn run() -> Result<()> {
+fn draw(state: &GameState, ctx: &mut ggez::Context) -> ggez::GameResult {
+    graphics::clear(ctx, [1.0, 1.0, 1.0, 1.0].into());
+
+    for pos in state.positions.clone() {
+        let circle = graphics::Mesh::new_circle(
+            ctx,
+            graphics::DrawMode::fill(),
+            na::Point2::new(pos.0, pos.1),
+            30.0,
+            1.0,
+            [1.0, 0.0, 0.0, 1.0].into()
+        )?;
+        graphics::draw(ctx, &circle, (na::Point2::new(50.0, 50.0),))?;
+    }
+
+    graphics::present(ctx)?;
+    Ok(())
+}
+
+fn on_event(event: &Event, ctx: &mut ggez::Context) {
+    match event {
+        Event::WindowEvent { event, .. } => match event {
+            WindowEvent::CloseRequested => event::quit(ctx),
+            WindowEvent::KeyboardInput {
+                input: KeyboardInput { virtual_keycode: Some(keycode), .. }, ..
+            } => match keycode {
+                event::KeyCode::Escape => event::quit(ctx),
+                _ => {}
+            },
+            // `CloseRequested` and `KeyboardInput` events won't appear here.
+            x => println!("Other window event fired: {:?}", x)
+        }
+        x => println!("Device event fired: {:?}", x)
+    }
+}
+
+async fn async_main() -> () {
+    logging::setup().unwrap();
+
     trace!("client starting");
 
     // Try to create a connection, retrying 5 times
@@ -148,26 +114,67 @@ async fn run() -> Result<()> {
 
     task::spawn(keep_alive(conn.clone()));
 
-    loop {
-        conn.next_message().await;
-        trace!("should handle message");
-        // let next_message = conn.next_message().boxed().fuse();
-        // pin_mut!(next_message);
-//        select! {
-//            msg = next_message => {
-//                trace!("{:?}", msg);
-//                panic!();
-//            }
-//        };
+    let cb = ggez::ContextBuilder::new("baseplate", "strax").window_setup(WindowSetup {
+        title: "baseplate".to_owned(),
+        samples: NumSamples::Zero,
+        vsync: true,
+        icon: "".to_owned(),
+        srgb: true
+    });
+    let (ctx, event_loop) = &mut cb.build().unwrap();
+    let state = &mut GameState::new().unwrap();
+
+    let (mut tx, mut rx) = mpsc::unbounded();
+
+    let mut next_message = Fuse::terminated();
+    let mut input_tick = Fuse::terminated();
+    pin_mut!(next_message, input_tick);
+    next_message.set(conn.next_message().fuse());
+    input_tick.set(Delay::new(Duration::from_millis(16)).fuse());
+
+
+    while ctx.continuing {
+        ctx.timer_context.tick();
+        event_loop.poll_events(|event| tx.unbounded_send(event).unwrap());
+
+        select! {
+            event = rx.select_next_some() => {
+                ctx.process_event(&event);
+                on_event(&event, ctx);
+            },
+            () = input_tick => {
+                handle_movement(ctx, &conn).await;
+                input_tick.set(Delay::new(Duration::from_millis(16)).fuse());
+            }
+            msg = next_message => {
+                match msg {
+                    Message::Refresh(positions) => {
+                        state.positions = positions;
+                        draw(state, ctx).unwrap();
+                    },
+                    _ => {}
+                }
+                next_message.set(conn.next_message().fuse());
+            }
+        }
     }
-
-
-    Ok(())
 }
 
-fn main() -> Result<()> {
-    logging::setup()?;
+async fn handle_movement(ctx: &mut ggez::Context, conn: &Conn) {
+    if input::keyboard::is_key_pressed(ctx, KeyCode::Right) {
+        conn.send(Message::Move { dx: 1.0, dy: 0.0 }).await;
+    }
+    if input::keyboard::is_key_pressed(ctx, KeyCode::Left) {
+        conn.send(Message::Move { dx: -1.0, dy: 0.0 }).await;
+    }
+    if input::keyboard::is_key_pressed(ctx, KeyCode::Down) {
+        conn.send(Message::Move { dx: 0.0, dy: 1.0 }).await;
+    }
+    if input::keyboard::is_key_pressed(ctx, KeyCode::Up) {
+        conn.send(Message::Move { dx: 0.0, dy: -1.0 }).await;
+    }
+}
 
-    executor::block_on(run())?;
-    Ok(())
+fn main() {
+    executor::block_on(async_main());
 }
