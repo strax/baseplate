@@ -12,7 +12,6 @@ env_logger = "0.7.0"
 chrono = "0.4.9"
 shared = { path = "../shared" }
 bytes = "0.4.12"
-crossbeam = "0.7.2"
 bincode = "1.2.0"
 rand = "0.7.2"
 async-std = "0.99.9"

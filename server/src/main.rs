@@ -49,7 +49,6 @@ impl State {
 
 async fn async_main() {
     shared::logging::setup().unwrap();
-
     let addr = SocketAddr::from_str("0.0.0.0:12345").unwrap();
 
     let socket = Arc::new(UdpSocket::bind("0.0.0.0:12345").await.unwrap());
@@ -84,6 +83,10 @@ async fn read_socket(state: Arc<Mutex<State>>, socket: Arc<UdpSocket>) -> () {
             Ok(packet) => {
                 trace!("valid packet, forwarding");
                 session.on_packet(packet).await;
+                if session.disconnected() {
+                    info!("client disconnected");
+                    state.sessions.remove(&remote);
+                }
             },
             Err(err) => {
                 warn!("decode error: {}", err);

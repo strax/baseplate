@@ -12,6 +12,7 @@ use bytes::Bytes;
 use rand::random;
 use async_std::sync::Arc;
 use async_std::task;
+use futures::future::{Abortable, AbortHandle};
 
 #[derive(Debug)]
 pub struct Session {
@@ -21,7 +22,8 @@ pub struct Session {
     // rx: chan::UnboundedReceiver<SessionMessage>,
     socket: Arc<UdpSocket>,
     handshake: HandshakeState,
-    pos: (f32, f32)
+    pos: (f32, f32),
+    disconnected: bool
 }
 
 impl Session {
@@ -30,14 +32,11 @@ impl Session {
     }
 
     pub fn new(remote: SocketAddr, socket: Arc<UdpSocket>) -> Session {
-        // Make a new channel as sender/recipient pair
-        // let (tx, rx) = chan::unbounded();
+        Session { remote, socket, client_sequence: 0, server_sequence: 1, handshake: HandshakeState::Disconnected, pos: (0.0, 0.0), disconnected: false }
+    }
 
-        // Create a new session actor and start it in a separate thread
-        let session = Session { remote, socket, client_sequence: 0, server_sequence: 1, handshake: HandshakeState::Disconnected, pos: (0.0, 0.0) };
-
-        // Return the transmission part of the channel
-        session
+    pub fn disconnected(&self) -> bool {
+        self.disconnected
     }
 
     pub async fn on_packet(&mut self, packet: Packet) -> () {
@@ -58,6 +57,9 @@ impl Session {
                 },
                 Message::Move { dx, dy } => {
                     self.pos = (self.pos.0 + dx, self.pos.1 + dy);
+                },
+                Message::Disconnect => {
+                    self.disconnected = true;
                 }
                 _ => {}
             }

@@ -11,6 +11,7 @@ use snafu::{Snafu};
 use log::*;
 use std::sync::atomic::{Ordering, AtomicU32};
 use async_std::future::timeout;
+use futures::executor;
 
 #[derive(Snafu, Debug)]
 enum ConnError {

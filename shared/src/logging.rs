@@ -3,11 +3,13 @@ use std::thread;
 
 use fern;
 use fern::colors::{Color, ColoredLevelConfig};
+use log::{LevelFilter};
 
 pub fn setup() -> Result<(), Box<dyn Error + Sync + Send>> {
     let colors = ColoredLevelConfig::new().error(Color::Red).warn(Color::Yellow).info(Color::Green).debug(Color::Magenta).trace(Color::BrightBlack);
 
     fern::Dispatch::new()
+        .level_for("gfx_device_gl", LevelFilter::Warn)
         .format(move |out, msg, record| {
             out.finish(format_args!(
                 "{color}{file}:{line} | {thread} | {level} | {message}\x1B[0m",

@@ -5,6 +5,7 @@ use crate::state::State;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum Message {
     Connect,
+    Disconnect,
     Handshake(HandshakeMessage),
     Heartbeat,
     Refresh(Vec<(f32, f32)>),

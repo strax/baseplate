@@ -19,32 +19,31 @@ use async_std::net::ToSocketAddrs;
 use async_std::sync::Arc;
 use bincode;
 use bytes::Bytes;
-use futures::channel::mpsc;
 use futures::{executor, Poll};
+use futures::channel::mpsc;
 use futures::executor::ThreadPool;
+use futures::future::Fuse;
 use futures::lock::Mutex;
+use futures::pin_mut;
 use futures::prelude::*;
 use futures::select;
+use futures::stream;
 use futures::stream::FusedStream;
-use futures_timer::Delay;
-use log::{debug, error, info, trace, warn};
-use snafu::Snafu;
-use ggez;
-use ggez::event::{self, EventHandler, EventsLoop};
-use ggez::graphics;
-use ggez::nalgebra as na;
 use futures::task::Context;
-use futures::pin_mut;
+use futures_timer::Delay;
+use ggez;
+use ggez::conf::{NumSamples, WindowSetup};
+use ggez::event::{self, EventHandler, EventsLoop};
+use ggez::event::winit_event::{Event, KeyboardInput, WindowEvent};
+use ggez::graphics;
+use ggez::input;
+use ggez::input::keyboard::KeyCode;
+use ggez::nalgebra as na;
+use log::{debug, error, info, trace, warn};
 
 use conn::Conn;
 use shared::{handshake::*, hexdump, logging, packet::Packet, proto::*, Result};
 use shared::future::retry;
-use ggez::conf::{WindowSetup, NumSamples};
-use ggez::input;
-use ggez::input::keyboard::KeyCode;
-use ggez::event::winit_event::{Event, WindowEvent, KeyboardInput};
-use futures::future::Fuse;
-use futures::stream;
 
 mod conn;
 
@@ -124,10 +123,10 @@ async fn async_main() -> () {
     let (ctx, event_loop) = &mut cb.build().unwrap();
     let state = &mut GameState::new().unwrap();
 
-    let (mut tx, mut rx) = mpsc::unbounded();
+    let (tx, mut rx) = mpsc::unbounded();
 
-    let mut next_message = Fuse::terminated();
-    let mut input_tick = Fuse::terminated();
+    let next_message = Fuse::terminated();
+    let input_tick = Fuse::terminated();
     pin_mut!(next_message, input_tick);
     next_message.set(conn.next_message().fuse());
     input_tick.set(Delay::new(Duration::from_millis(16)).fuse());
@@ -158,6 +157,8 @@ async fn async_main() -> () {
             }
         }
     }
+
+    conn.send(Message::Disconnect).await;
 }
 
 async fn handle_movement(ctx: &mut ggez::Context, conn: &Conn) {
