@@ -4,7 +4,7 @@ use std::thread;
 use fern;
 use fern::colors::{Color, ColoredLevelConfig};
 
-pub fn setup() -> Result<(), Box<dyn Error>> {
+pub fn setup() -> Result<(), Box<dyn Error + Sync + Send>> {
     let colors = ColoredLevelConfig::new().error(Color::Red).warn(Color::Yellow).info(Color::Green).debug(Color::Magenta).trace(Color::BrightBlack);
 
     fern::Dispatch::new()

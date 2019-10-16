@@ -49,6 +49,9 @@ impl Session {
                             },
                             Message::Handshake(handshake_msg) => {
                                 self.on_handshake_message(handshake_msg);
+                            },
+                            Message::Heartbeat => {
+                                self.send(Message::Heartbeat).unwrap();
                             }
                         }
                     } else {
@@ -63,7 +66,7 @@ impl Session {
         trace!("session handler thread exhausted of work");
     }
 
-    fn on_connect(&mut self) -> Result<(), Box<dyn Error>> {
+    fn on_connect(&mut self) -> Result<(), Box<dyn Error + Sync + Send>> {
         let nonce = random::<u32>();
         if self.handshake == HandshakeState::Disconnected {
             self.handshake = HandshakeState::Negotiating { nonce };
@@ -97,7 +100,7 @@ impl Session {
         }
     }
 
-    fn send(&mut self, msg: Message) -> Result<(), Box<dyn Error>> {
+    fn send(&mut self, msg: Message) -> Result<(), Box<dyn Error + Sync + Send>> {
         let data = Bytes::from(bincode::serialize(&msg)?);
         debug!("SEND {:?}", msg);
         let packet = Packet::new(self.server_sequence, data);

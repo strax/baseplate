@@ -88,7 +88,7 @@ impl Packet {
         Ok(Packet { sequence_number, timestamp, message })
     }
 
-    pub fn to_bytes(&self) -> Result<Bytes, Box<dyn Error>> {
+    pub fn to_bytes(&self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
         let mut bytes = BytesMut::with_capacity(65507);
         bytes.put_u32_be(self.sequence_number);
         bytes.put_u32_be(crc32::checksum_ieee(&self.message));

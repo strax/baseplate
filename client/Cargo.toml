@@ -12,3 +12,8 @@ shared = { path = "../shared" }
 crossbeam = "0.7.2"
 bytes = "0.4.12"
 bincode = "1.2.0"
+futures-preview = { version = "0.3.0-alpha.19", features = ["async-await"] }
+futures-util-preview = "0.3.0-alpha.19"
+pin-utils = "0.1.0-alpha.4"
+futures-timer = "1.0.2"
+async-std = "0.99.9"

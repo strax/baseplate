@@ -4,6 +4,7 @@ use super::handshake::HandshakeMessage;
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Message {
     Connect,
-    Handshake(HandshakeMessage)
+    Handshake(HandshakeMessage),
+    Heartbeat
 }
 
