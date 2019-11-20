@@ -1,13 +1,13 @@
-use bytes::{Bytes, Buf, Reader, Writer, BytesMut, BufMut, ByteOrder, LittleEndian as LE};
-use std::error::Error;
-use std::io::{Read, Cursor, Write};
-use pretty_hex::*;
-use std::trace_macros;
-use snafu::{Snafu, ensure};
-use crc::crc32;
-use std::fmt;
-use chrono::prelude::*;
 use super::hexdump;
+use bytes::{Buf, BufMut, ByteOrder, Bytes, BytesMut, LittleEndian as LE, Reader, Writer};
+use chrono::prelude::*;
+use crc::crc32;
+use pretty_hex::*;
+use snafu::{ensure, Snafu};
+use std::error::Error;
+use std::fmt;
+use std::io::{Cursor, Write};
+use std::trace_macros;
 
 macro_rules! ensure_size {
     ($size:expr, $cur:expr) => {{
@@ -28,30 +28,31 @@ macro_rules! read {
 
 fn take(count: usize, cursor: Cursor<Bytes>) -> Result<Bytes, PacketError> {
     ensure_size!(count, cursor);
-    Ok(cursor.get_ref().slice(cursor.position() as usize, cursor.position() as usize + count))
+    Ok(cursor.get_ref().slice(
+        cursor.position() as usize,
+        cursor.position() as usize + count,
+    ))
 }
 
 #[derive(Debug, Snafu)]
 pub enum PacketError {
     #[snafu(display("expected {} bytes for reading, got {}", expected, actual))]
-    InvalidLength {
-        expected: usize,
-        actual: usize
-    },
-    #[snafu(display("invalid message checksum (expected {:#x}, got {:#x})", received, computed))]
-    InvalidChecksum {
-        received: u32,
-        computed: u32
-    },
+    InvalidLength { expected: usize, actual: usize },
+    #[snafu(display(
+        "invalid message checksum (expected {:#x}, got {:#x})",
+        received,
+        computed
+    ))]
+    InvalidChecksum { received: u32, computed: u32 },
     #[snafu(display("invalid timestamp"))]
-    InvalidTimestamp
+    InvalidTimestamp,
 }
 
 #[derive(Eq, PartialEq)]
 pub struct Packet {
     pub sequence_number: u32,
     pub timestamp: DateTime<Utc>,
-    pub message: Bytes
+    pub message: Bytes,
 }
 
 impl fmt::Debug for Packet {
@@ -66,9 +67,13 @@ impl fmt::Debug for Packet {
 
 impl Packet {
     pub fn new(sequence_number: u32, message: Bytes) -> Packet {
-        let checksum = crc32::checksum_ieee(&message);
+        let _checksum = crc32::checksum_ieee(&message);
         let timestamp = Utc::now();
-        Packet { sequence_number, timestamp, message }
+        Packet {
+            sequence_number,
+            timestamp,
+            message,
+        }
     }
 
     pub fn from_bytes(bytes: Bytes) -> Result<Packet, PacketError> {
@@ -83,9 +88,19 @@ impl Packet {
 
         // Check that the received message matches the checksum transmitted in the header
         let computed_checksum = crc32::checksum_ieee(&message);
-        ensure!(received_checksum == computed_checksum, InvalidChecksum { received: received_checksum, computed: computed_checksum });
+        ensure!(
+            received_checksum == computed_checksum,
+            InvalidChecksum {
+                received: received_checksum,
+                computed: computed_checksum
+            }
+        );
         trace_macros!(false);
-        Ok(Packet { sequence_number, timestamp, message })
+        Ok(Packet {
+            sequence_number,
+            timestamp,
+            message,
+        })
     }
 
     pub fn to_bytes(&self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
@@ -108,7 +123,7 @@ mod tests {
         let packet = Packet {
             message: Bytes::from_static(b"HELLO WORLD!"),
             sequence_number: 5,
-            timestamp: Utc::now()
+            timestamp: Utc::now(),
         };
         hexdump!(packet.to_bytes().unwrap());
     }
@@ -118,7 +133,7 @@ mod tests {
         let packet = Packet {
             message: Bytes::from_static(b"HELLO WORLD!"),
             sequence_number: 5,
-            timestamp: Utc::now()
+            timestamp: Utc::now(),
         };
         let encoded = packet.to_bytes().unwrap();
         hexdump!(encoded);
@@ -129,9 +144,13 @@ mod tests {
 
     #[test]
     fn test_bad_input() {
-        match Packet::from_bytes(Bytes::from_static(b"osaijioajdoiasjdoisajidjisoajdoiajiojdas")) {
+        match Packet::from_bytes(Bytes::from_static(
+            b"osaijioajdoiasjdoisajidjisoajdoiajiojdas",
+        )) {
             Ok(_) => panic!("should not happen"),
-            Err(err) => { dbg!(err); }
+            Err(err) => {
+                dbg!(err);
+            }
         }
     }
 }

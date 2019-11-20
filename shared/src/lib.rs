@@ -1,13 +1,12 @@
 #![feature(trace_macros)]
 
-pub mod packet;
-pub mod proto;
+pub mod future;
 pub mod handshake;
 pub mod logging;
-pub mod future;
+pub mod packet;
+pub mod proto;
 pub mod state;
 
-use packet::*;
 use bytes::Bytes;
 use pretty_hex::PrettyHex;
 
@@ -17,7 +16,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + S
 macro_rules! hexdump {
     ($expr: expr) => {
         dbg!($expr.as_ref().hex_dump());
-    }
+    };
 }
 
 #[inline]

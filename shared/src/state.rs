@@ -1,6 +1,6 @@
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct State {
-    points: Vec<(f32, f32)>
+    points: Vec<(f32, f32)>,
 }

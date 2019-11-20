@@ -1,36 +1,40 @@
-use async_std::sync::Arc;
-use async_std::net::UdpSocket;
-use std::net::SocketAddr;
-use shared::{Result, hexdump};
-use std::time::Duration;
-use shared::proto::Message;
-use bytes::Bytes;
-use shared::packet::Packet;
-use shared::handshake::HandshakeMessage;
-use snafu::{Snafu};
-use log::*;
-use std::sync::atomic::{Ordering, AtomicU32};
 use async_std::future::timeout;
-use futures::executor;
+use async_std::net::UdpSocket;
+use async_std::sync::Arc;
+use bytes::Bytes;
+use log::*;
+use shared::handshake::HandshakeMessage;
+use shared::packet::Packet;
+use shared::proto::Message;
+use shared::{hexdump, Result};
+use snafu::Snafu;
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 #[derive(Snafu, Debug)]
 enum ConnError {
     #[snafu(display("handshake failure"))]
-    HandshakeFailure
+    HandshakeFailure,
 }
 
 pub struct Conn {
     server_sequence: Arc<AtomicU32>,
     client_sequence: Arc<AtomicU32>,
     socket: UdpSocket,
-    remote: SocketAddr
+    remote: SocketAddr,
 }
 
 impl Conn {
     pub async fn connect(remote: SocketAddr) -> Result<Conn> {
         let socket = UdpSocket::bind("127.0.0.1:0").await?;
         trace!("socket created");
-        let conn = Conn { server_sequence: Arc::new(AtomicU32::new(0)), client_sequence: Arc::new(AtomicU32::new(1)), socket, remote };
+        let conn = Conn {
+            server_sequence: Arc::new(AtomicU32::new(0)),
+            client_sequence: Arc::new(AtomicU32::new(1)),
+            socket,
+            remote,
+        };
 
         // First send connect message
         trace!("sending connect msg");
@@ -41,19 +45,14 @@ impl Conn {
         // Now we should receive a challenge nonce
         match timeout(Duration::from_secs(5), conn.next_message()).await? {
             Message::Handshake(HandshakeMessage::Challenge(nonce)) => {
-                conn.send(Message::Handshake(HandshakeMessage::Challenge(nonce))).await?;
+                conn.send(Message::Handshake(HandshakeMessage::Challenge(nonce)))
+                    .await?;
             }
-            _ => {
-                return Err(ConnError::HandshakeFailure.into())
-            }
+            _ => return Err(ConnError::HandshakeFailure.into()),
         }
         match timeout(Duration::from_secs(5), conn.next_message()).await? {
-            Message::Handshake(HandshakeMessage::Success) => {
-                Ok(conn)
-            }
-            _ => {
-                return Err(ConnError::HandshakeFailure.into())
-            }
+            Message::Handshake(HandshakeMessage::Success) => Ok(conn),
+            _ => return Err(ConnError::HandshakeFailure.into()),
         }
     }
 
@@ -87,7 +86,8 @@ impl Conn {
                 if packet.sequence_number > server_sequence.load(Ordering::SeqCst) {
                     match bincode::deserialize::<Message>(&packet.message) {
                         Ok(message) => {
-                            self.server_sequence.store(packet.sequence_number, Ordering::SeqCst);
+                            self.server_sequence
+                                .store(packet.sequence_number, Ordering::SeqCst);
                             debug!("RECV {:?}", message);
                             return message;
                         }

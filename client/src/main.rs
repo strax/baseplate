@@ -1,61 +1,53 @@
 #![feature(mem_take)]
 #![feature(async_closure)]
 
-use std::borrow::Borrow;
-use std::borrow::BorrowMut;
-use std::cell::{Cell, RefCell};
-use std::error::Error;
-use std::mem;
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::rc::Rc;
+
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::thread;
+
 use std::time::Duration;
 
-use async_std::{future::timeout, net::UdpSocket, task};
-use async_std::net::ToSocketAddrs;
+use async_std::task;
+
 use async_std::sync::Arc;
-use bincode;
-use bytes::Bytes;
-use futures::{executor, Poll};
+
 use futures::channel::mpsc;
-use futures::executor::ThreadPool;
+use futures::executor;
+
 use futures::future::Fuse;
-use futures::lock::Mutex;
+
 use futures::pin_mut;
 use futures::prelude::*;
 use futures::select;
-use futures::stream;
-use futures::stream::FusedStream;
-use futures::task::Context;
+
 use futures_timer::Delay;
 use ggez;
 use ggez::conf::{NumSamples, WindowSetup};
-use ggez::event::{self, EventHandler, EventsLoop};
 use ggez::event::winit_event::{Event, KeyboardInput, WindowEvent};
+use ggez::event::{self};
 use ggez::graphics;
 use ggez::input;
 use ggez::input::keyboard::KeyCode;
 use ggez::nalgebra as na;
-use log::{debug, error, info, trace, warn};
+use log::{info, trace, warn};
 
 use conn::Conn;
-use shared::{handshake::*, hexdump, logging, packet::Packet, proto::*, Result};
 use shared::future::retry;
+use shared::{handshake::*, hexdump, logging, packet::Packet, proto::*, Result};
 
 mod conn;
 
 async fn keep_alive(conn: Arc<Conn>) {
     loop {
         Delay::new(Duration::from_secs(5)).await;
-        conn.send(Message::Heartbeat).await.unwrap_or_else(|err| warn!("error sending heartbeat: {}", err));
+        conn.send(Message::Heartbeat)
+            .await
+            .unwrap_or_else(|err| warn!("error sending heartbeat: {}", err));
     }
 }
 
 struct GameState {
-    positions: Vec<(f32, f32)>
+    positions: Vec<(f32, f32)>,
 }
 
 impl GameState {
@@ -74,7 +66,7 @@ fn draw(state: &GameState, ctx: &mut ggez::Context) -> ggez::GameResult {
             na::Point2::new(pos.0, pos.1),
             30.0,
             1.0,
-            [1.0, 0.0, 0.0, 1.0].into()
+            [1.0, 0.0, 0.0, 1.0].into(),
         )?;
         graphics::draw(ctx, &circle, (na::Point2::new(50.0, 50.0),))?;
     }
@@ -88,15 +80,20 @@ fn on_event(event: &Event, ctx: &mut ggez::Context) {
         Event::WindowEvent { event, .. } => match event {
             WindowEvent::CloseRequested => event::quit(ctx),
             WindowEvent::KeyboardInput {
-                input: KeyboardInput { virtual_keycode: Some(keycode), .. }, ..
+                input:
+                    KeyboardInput {
+                        virtual_keycode: Some(keycode),
+                        ..
+                    },
+                ..
             } => match keycode {
                 event::KeyCode::Escape => event::quit(ctx),
                 _ => {}
             },
             // `CloseRequested` and `KeyboardInput` events won't appear here.
-            x => println!("Other window event fired: {:?}", x)
-        }
-        x => println!("Device event fired: {:?}", x)
+            x => println!("Other window event fired: {:?}", x),
+        },
+        x => println!("Device event fired: {:?}", x),
     }
 }
 
@@ -106,9 +103,13 @@ async fn async_main() -> () {
     trace!("client starting");
 
     // Try to create a connection, retrying 5 times
-    let conn = Arc::new(retry(5, async || {
-        Conn::connect(SocketAddr::from_str("127.0.0.1:12345")?).await
-    }).await.expect("unable to connect to the server"));
+    let conn = Arc::new(
+        retry(5, async || {
+            Conn::connect(SocketAddr::from_str("127.0.0.1:12345")?).await
+        })
+        .await
+        .expect("unable to connect to the server"),
+    );
     info!("connection estabilished");
 
     task::spawn(keep_alive(conn.clone()));
@@ -118,7 +119,7 @@ async fn async_main() -> () {
         samples: NumSamples::Zero,
         vsync: true,
         icon: "".to_owned(),
-        srgb: true
+        srgb: true,
     });
     let (ctx, event_loop) = &mut cb.build().unwrap();
     let state = &mut GameState::new().unwrap();
@@ -130,7 +131,6 @@ async fn async_main() -> () {
     pin_mut!(next_message, input_tick);
     next_message.set(conn.next_message().fuse());
     input_tick.set(Delay::new(Duration::from_millis(16)).fuse());
-
 
     while ctx.continuing {
         ctx.timer_context.tick();

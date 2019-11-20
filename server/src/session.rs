@@ -1,18 +1,12 @@
-use std::thread;
-use log::{info, warn, trace, debug, error};
-use futures::channel::mpsc as chan;
-use futures::stream::StreamExt;
-use super::SessionMessage;
-use std::pin::Pin;
-use std::net::{SocketAddr};
-use async_std::net::{UdpSocket};
-use std::error::Error;
-use shared::{hexdump, packet::Packet, proto::*, handshake::*};
+use log::{debug, error, info, trace, warn};
+
+use async_std::net::UdpSocket;
+use async_std::sync::Arc;
 use bytes::Bytes;
 use rand::random;
-use async_std::sync::Arc;
-use async_std::task;
-use futures::future::{Abortable, AbortHandle};
+use shared::{handshake::*, hexdump, packet::Packet, proto::*};
+use std::error::Error;
+use std::net::SocketAddr;
 
 #[derive(Debug)]
 pub struct Session {
@@ -23,7 +17,7 @@ pub struct Session {
     socket: Arc<UdpSocket>,
     handshake: HandshakeState,
     pos: (f32, f32),
-    disconnected: bool
+    disconnected: bool,
 }
 
 impl Session {
@@ -32,7 +26,15 @@ impl Session {
     }
 
     pub fn new(remote: SocketAddr, socket: Arc<UdpSocket>) -> Session {
-        Session { remote, socket, client_sequence: 0, server_sequence: 1, handshake: HandshakeState::Disconnected, pos: (0.0, 0.0), disconnected: false }
+        Session {
+            remote,
+            socket,
+            client_sequence: 0,
+            server_sequence: 1,
+            handshake: HandshakeState::Disconnected,
+            pos: (0.0, 0.0),
+            disconnected: false,
+        }
     }
 
     pub fn disconnected(&self) -> bool {
@@ -48,16 +50,16 @@ impl Session {
             match message {
                 Message::Connect => {
                     self.on_connect().await;
-                },
+                }
                 Message::Handshake(handshake_msg) => {
                     self.on_handshake_message(handshake_msg).await;
-                },
+                }
                 Message::Heartbeat => {
                     self.send(&Message::Heartbeat).await.unwrap();
-                },
+                }
                 Message::Move { dx, dy } => {
                     self.pos = (self.pos.0 + dx, self.pos.1 + dy);
-                },
+                }
                 Message::Disconnect => {
                     self.disconnected = true;
                 }
@@ -72,7 +74,8 @@ impl Session {
         let nonce = random::<u32>();
         if self.handshake == HandshakeState::Disconnected {
             self.handshake = HandshakeState::Negotiating { nonce };
-            self.send(&Message::Handshake(HandshakeMessage::Challenge(nonce))).await?;
+            self.send(&Message::Handshake(HandshakeMessage::Challenge(nonce)))
+                .await?;
         } else {
             // Handshake is already in progress, ignore packet
             warn!("duplicate connection attempt, handshake already in progress");
@@ -87,15 +90,17 @@ impl Session {
                     // challenge authorized
                     self.handshake = HandshakeState::Connected;
                     info!("connection transitioned to CONNECTED");
-                    self.send(&Message::Handshake(HandshakeMessage::Success)).await;
+                    self.send(&Message::Handshake(HandshakeMessage::Success))
+                        .await;
                 } else {
                     // invalid nonce
                     warn!("received nonce differs");
                     self.handshake = HandshakeState::Disconnected;
                     error!("connection transitioned to DISCONNECTED");
-                    self.send(&Message::Handshake(HandshakeMessage::Failure)).await;
+                    self.send(&Message::Handshake(HandshakeMessage::Failure))
+                        .await;
                 }
-            },
+            }
             (state, msg) => {
                 warn!("invalid state, message pair: ({:?}, {:?})", state, msg);
             }
@@ -107,7 +112,12 @@ impl Session {
         debug!("SEND {:?}", msg);
         let packet = Packet::new(self.server_sequence, data);
         let wire_bytes = packet.to_bytes()?;
-        trace!("SEND to {}\n{:?}\n{}", self.remote, packet, hexdump(&wire_bytes));
+        trace!(
+            "SEND to {}\n{:?}\n{}",
+            self.remote,
+            packet,
+            hexdump(&wire_bytes)
+        );
         self.socket.send_to(&wire_bytes, self.remote).await?;
         self.server_sequence += 1;
         Ok(())

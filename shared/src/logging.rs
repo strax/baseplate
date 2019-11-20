@@ -3,10 +3,15 @@ use std::thread;
 
 use fern;
 use fern::colors::{Color, ColoredLevelConfig};
-use log::{LevelFilter};
+use log::LevelFilter;
 
 pub fn setup() -> Result<(), Box<dyn Error + Sync + Send>> {
-    let colors = ColoredLevelConfig::new().error(Color::Red).warn(Color::Yellow).info(Color::Green).debug(Color::Magenta).trace(Color::BrightBlack);
+    let colors = ColoredLevelConfig::new()
+        .error(Color::Red)
+        .warn(Color::Yellow)
+        .info(Color::Green)
+        .debug(Color::Magenta)
+        .trace(Color::BrightBlack);
 
     fern::Dispatch::new()
         .level_for("gfx_device_gl", LevelFilter::Warn)
@@ -20,7 +25,9 @@ pub fn setup() -> Result<(), Box<dyn Error + Sync + Send>> {
                 level = record.level(),
                 message = msg
             ))
-        }).chain(std::io::stdout()).apply()?;
+        })
+        .chain(std::io::stdout())
+        .apply()?;
 
     Ok(())
 }

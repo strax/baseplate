@@ -1,6 +1,5 @@
-use serde_derive::{Deserialize, Serialize};
 use super::handshake::HandshakeMessage;
-use crate::state::State;
+use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum Message {
@@ -9,6 +8,5 @@ pub enum Message {
     Handshake(HandshakeMessage),
     Heartbeat,
     Refresh(Vec<(f32, f32)>),
-    Move { dx: f32, dy: f32 }
+    Move { dx: f32, dy: f32 },
 }
-
